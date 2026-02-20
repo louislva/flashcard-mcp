@@ -7,17 +7,10 @@ export class KVStore implements StoreBackend {
   private redis: Redis;
 
   constructor() {
-    const url = process.env.STORAGE_REST_API_URL
-      || process.env.KV_REST_API_URL
-      || process.env.UPSTASH_REDIS_REST_URL;
-    const token = process.env.STORAGE_REST_API_TOKEN
-      || process.env.KV_REST_API_TOKEN
-      || process.env.UPSTASH_REDIS_REST_TOKEN;
-
-    if (!url || !token) {
-      throw new Error("Missing Redis credentials env vars (tried STORAGE_*, KV_*, UPSTASH_REDIS_* prefixes)");
-    }
-    this.redis = new Redis({ url, token });
+    this.redis = new Redis({
+      url: process.env.KV_REST_API_URL!,
+      token: process.env.KV_REST_API_TOKEN!,
+    });
   }
 
   async load(): Promise<Store> {
