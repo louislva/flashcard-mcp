@@ -1,4 +1,7 @@
 {
+  "buildCommand": "npm run build",
+  "outputDirectory": ".",
+  "framework": null,
   "functions": {
     "api/mcp.ts": {
       "maxDuration": 30
