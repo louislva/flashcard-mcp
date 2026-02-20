@@ -3,6 +3,7 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { KVStore } from "../src/kv-store.js";
 import { registerTools } from "../src/tools.js";
+import { validateAccessToken } from "../src/oauth.js";
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   // CORS
@@ -16,14 +17,31 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return;
   }
 
-  // Auth — set FLASHCARD_API_KEY in Vercel env vars to enable
+  // Auth: accept static API key OR OAuth token
   const apiKey = process.env.FLASHCARD_API_KEY;
-  if (apiKey) {
-    const auth = req.headers.authorization;
-    if (auth !== `Bearer ${apiKey}`) {
-      res.status(401).json({ error: "Unauthorized" });
-      return;
+  const auth = req.headers.authorization;
+  const token = auth?.startsWith("Bearer ") ? auth.slice(7) : null;
+
+  let authenticated = false;
+
+  if (token) {
+    // Check static API key first (backward compat)
+    if (apiKey && token === apiKey) {
+      authenticated = true;
+    } else {
+      // Check OAuth token in Redis
+      authenticated = await validateAccessToken(token);
     }
+  }
+
+  if (!authenticated) {
+    const host = `https://${req.headers.host}`;
+    res.setHeader(
+      "WWW-Authenticate",
+      `Bearer resource_metadata="${host}/.well-known/oauth-protected-resource"`
+    );
+    res.status(401).json({ error: "Unauthorized" });
+    return;
   }
 
   // Create server + tools per request (stateless mode)
