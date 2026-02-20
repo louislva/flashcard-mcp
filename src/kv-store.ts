@@ -17,6 +17,9 @@ export class KVStore implements StoreBackend {
     const data = await this.redis.get<Store>(STORE_KEY);
     if (!data) return { projects: [], flashcards: [] };
     if (!data.projects) data.projects = [];
+    for (const p of data.projects) {
+      if (p.memory === undefined) p.memory = "";
+    }
     return data;
   }
 

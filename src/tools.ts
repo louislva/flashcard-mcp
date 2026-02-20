@@ -8,7 +8,7 @@ export function registerTools(server: McpServer, store: StoreBackend) {
 
   server.tool(
     "list_projects",
-    "List all flashcard projects. Call this first to see what projects exist before creating flashcards or querying them. Each project has a name and description so you can pick the right one.",
+    "List all flashcard projects. Call this first to see what projects exist before creating flashcards or querying them. Each project has a name and description so you can pick the right one. IMPORTANT: Each project has a memory that contains persistent notes and context. After listing projects, call read_memory for any project you will be working with if you haven't already this conversation.",
     {},
     async () => {
       const data = await store.load();
@@ -41,9 +41,75 @@ export function registerTools(server: McpServer, store: StoreBackend) {
       if (data.projects.find((p) => p.name === name)) {
         return { content: [{ type: "text" as const, text: `Project "${name}" already exists.` }] };
       }
-      data.projects.push({ name, description, created_at: new Date().toISOString() });
+      data.projects.push({ name, description, memory: "", created_at: new Date().toISOString() });
       await store.save(data);
       return { content: [{ type: "text" as const, text: `Created project "${name}": ${description}` }] };
+    }
+  );
+
+  server.tool(
+    "read_memory",
+    "Read a project's memory — persistent notes, context, and preferences that carry across conversations. You SHOULD call this for any project you are working with at the start of a conversation to understand prior context.",
+    {
+      project: z.string().describe("The project name"),
+    },
+    async ({ project }) => {
+      const data = await store.load();
+      const p = data.projects.find((p) => p.name === project);
+      if (!p) {
+        return { content: [{ type: "text" as const, text: `Project "${project}" not found.` }] };
+      }
+      if (!p.memory) {
+        return { content: [{ type: "text" as const, text: `Memory for "${project}" is empty. Use write_memory to add notes.` }] };
+      }
+      return { content: [{ type: "text" as const, text: p.memory }] };
+    }
+  );
+
+  server.tool(
+    "write_memory",
+    "Write to a project's memory — use this to save persistent notes, context, user preferences, or any information that should carry across conversations. This replaces the entire memory content, so include everything that should be retained.",
+    {
+      project: z.string().describe("The project name"),
+      content: z.string().describe("The full memory content to save (replaces existing memory)"),
+    },
+    async ({ project, content }) => {
+      const data = await store.load();
+      const p = data.projects.find((p) => p.name === project);
+      if (!p) {
+        return { content: [{ type: "text" as const, text: `Project "${project}" not found.` }] };
+      }
+      p.memory = content;
+      await store.save(data);
+      return { content: [{ type: "text" as const, text: `Memory updated for "${project}" (${content.length} chars).` }] };
+    }
+  );
+
+  server.tool(
+    "edit_memory",
+    "Make a targeted edit to a project's memory. Works like find-and-replace: specify the exact text to find (old_content) and what to replace it with (new_content). Use this instead of write_memory when you want to update a specific section without rewriting everything. To append, set old_content to an empty string.",
+    {
+      project: z.string().describe("The project name"),
+      old_content: z.string().describe("The exact text to find in the current memory. Use empty string to append to the end."),
+      new_content: z.string().describe("The text to replace it with. If old_content is empty, this is appended to the memory."),
+    },
+    async ({ project, old_content, new_content }) => {
+      const data = await store.load();
+      const p = data.projects.find((p) => p.name === project);
+      if (!p) {
+        return { content: [{ type: "text" as const, text: `Project "${project}" not found.` }] };
+      }
+      if (old_content === "") {
+        p.memory = p.memory ? p.memory + "\n" + new_content : new_content;
+        await store.save(data);
+        return { content: [{ type: "text" as const, text: `Appended to memory for "${project}" (${p.memory.length} chars total).` }] };
+      }
+      if (!p.memory.includes(old_content)) {
+        return { content: [{ type: "text" as const, text: `Could not find the specified text in memory for "${project}". Use read_memory to see current contents.` }] };
+      }
+      p.memory = p.memory.replace(old_content, new_content);
+      await store.save(data);
+      return { content: [{ type: "text" as const, text: `Memory edited for "${project}" (${p.memory.length} chars total).` }] };
     }
   );
 

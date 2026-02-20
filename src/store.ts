@@ -16,6 +16,7 @@ export interface Flashcard {
 export interface Project {
   name: string;
   description: string;
+  memory: string;
   created_at: string;
 }
 
@@ -36,6 +37,9 @@ export class FileStore implements StoreBackend {
     if (!existsSync(this.path)) return { projects: [], flashcards: [] };
     const data = JSON.parse(readFileSync(this.path, "utf-8"));
     if (!data.projects) data.projects = [];
+    for (const p of data.projects) {
+      if (p.memory === undefined) p.memory = "";
+    }
     return data;
   }
 
