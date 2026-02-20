@@ -96,6 +96,40 @@ export function registerTools(server: McpServer, store: StoreBackend) {
   );
 
   server.tool(
+    "edit_flashcard",
+    "Edit an existing flashcard. You can update the front, back, and/or tags. Only provided fields are changed.",
+    {
+      id: z.string().describe("The flashcard ID to edit"),
+      front: z.string().optional().describe("New question or prompt side of the flashcard"),
+      back: z.string().optional().describe("New answer side of the flashcard"),
+      tags: z.array(z.string()).optional().describe("New tags (replaces existing tags)"),
+    },
+    async ({ id, front, back, tags }) => {
+      const data = await store.load();
+      const idx = data.flashcards.findIndex((c) => c.id === id);
+      if (idx === -1) {
+        return { content: [{ type: "text" as const, text: `Flashcard ${id} not found.` }] };
+      }
+      if (front === undefined && back === undefined && tags === undefined) {
+        return { content: [{ type: "text" as const, text: "Nothing to update — provide at least one of front, back, or tags." }] };
+      }
+      const card = data.flashcards[idx];
+      if (front !== undefined) card.front = front;
+      if (back !== undefined) card.back = back;
+      if (tags !== undefined) card.tags = tags;
+      await store.save(data);
+      return {
+        content: [
+          {
+            type: "text" as const,
+            text: `Updated flashcard (${card.id}):\nFront: ${card.front}\nBack: ${card.back}\nTags: ${card.tags.join(", ") || "none"}`,
+          },
+        ],
+      };
+    }
+  );
+
+  server.tool(
     "get_due_flashcards",
     "Get flashcards that are due for review right now. Returns cards whose next_review date is in the past. Specify a project to filter, or omit to see due cards across all projects.",
     {
@@ -175,12 +209,16 @@ export function registerTools(server: McpServer, store: StoreBackend) {
 
   server.tool(
     "list_flashcards",
-    "List all flashcards, optionally filtered by project and/or tag. Shows front, tags, and review status.",
+    "List all flashcards, optionally filtered by project and/or tag. Shows front, tags, and review status. Supports pagination and ordering.",
     {
       project: z.string().optional().describe("Filter by project name"),
       tag: z.string().optional().describe("Filter by tag"),
+      order_by: z.enum(["created_at", "next_review"]).optional().describe("Field to order by (default: created_at)"),
+      order: z.enum(["asc", "desc"]).optional().describe("Sort direction (default: asc)"),
+      offset: z.number().optional().describe("Number of cards to skip for pagination (default: 0)"),
+      limit: z.number().optional().describe("Max number of cards to return for pagination (default: all)"),
     },
-    async ({ project, tag }) => {
+    async ({ project, tag, order_by, order, offset, limit }) => {
       const data = await store.load();
       let cards = data.flashcards;
       if (project) cards = cards.filter((c) => c.project === project);
@@ -193,20 +231,33 @@ export function registerTools(server: McpServer, store: StoreBackend) {
         };
       }
 
+      const field = order_by ?? "created_at";
+      const dir = order === "desc" ? -1 : 1;
+      cards.sort((a, b) => dir * a[field].localeCompare(b[field]));
+
+      const totalCount = cards.length;
+      const start = offset ?? 0;
+      if (limit !== undefined) {
+        cards = cards.slice(start, start + limit);
+      } else if (start > 0) {
+        cards = cards.slice(start);
+      }
+
       const now = new Date().toISOString();
       const text = cards
         .map((c, i) => {
           const due = c.next_review <= now ? "DUE" : `next: ${c.next_review.split("T")[0]}`;
-          return `${i + 1}. [${c.id}] (${c.project})\n   Front: ${c.front}\n   Tags: ${c.tags.join(", ") || "none"}\n   Status: ${due}`;
+          return `${start + i + 1}. [${c.id}] (${c.project})\n   Front: ${c.front}\n   Tags: ${c.tags.join(", ") || "none"}\n   Status: ${due}`;
         })
         .join("\n\n");
 
       const allTags = [...new Set(cards.flatMap((c) => c.tags))];
+      const paginationInfo = limit !== undefined ? `\n\nShowing ${start + 1}-${start + cards.length} of ${totalCount}` : "";
       return {
         content: [
           {
             type: "text" as const,
-            text: `${cards.length} flashcard(s):\n\n${text}\n\nAll tags: ${allTags.join(", ") || "none"}`,
+            text: `${totalCount} flashcard(s):${paginationInfo}\n\n${text}\n\nAll tags: ${allTags.join(", ") || "none"}`,
           },
         ],
       };
